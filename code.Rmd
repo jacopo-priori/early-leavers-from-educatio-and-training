@@ -1,0 +1,201 @@
+---
+title: 'code'
+author: 'Jacopo'
+date: '2024-04-05'
+output: html_document
+---
+
+```{r setup}
+# KNITTING SETUP
+
+knitr::opts_chunk$set(eval=TRUE, echo = TRUE, include = TRUE, warnings = FALSE)  
+```
+
+```{r}
+#LIBRARIES
+
+library('tidyverse')
+library('tidyr')
+library('dplyr')
+library('ggplot2')
+library('countrycode')
+library('choroplethr')
+library('tmap')
+library('RColorBrewer')
+library('sf')
+library('grid')
+library('ggmap')
+library("rnaturalearth")  # install_github('ropensci/rnaturalearthhires', force=TRUE1)
+library('ggpol')
+library('devtools')
+library("gridExtra")
+library('patchwork')
+library('mapIT')  # install_github('quantide/mapIT', force=TRUE1)
+```
+
+```{r}
+# INVALSI DATA
+
+el_vars <- read.csv('INV_el_vars.csv',sep=';', check.names = F)
+er_vars <- read.csv('INV_er_vars.csv',sep=';', check.names = F)
+maths_vars <- read.csv('INV_maths_vars.csv',sep=';', check.names = F)
+ita_vars <- read.csv('INV_ita_vars.csv',sep=';', check.names = F)
+
+el <- read.csv('INV_el.csv',sep=';', check.names = F)
+er <- read.csv('INV_er.csv',sep=';', check.names = F)
+maths <- read.csv('INV_maths.csv',sep=';', check.names = F)
+ita <- read.csv('INV_ita.csv',sep=';', check.names = F)
+```
+
+```{r}
+# EUROSTAT DATA
+
+countries <- read.csv('EURO_countries.csv')
+regions <- read.csv('EURO_regions.csv')
+overtime <- read.csv('EURO_overtime.csv')
+citizens <- read.csv('EURO_citizens.csv')
+employed <- read.csv('EURO_empoyed.csv')
+```
+
+```{r}
+# COUNTRIES
+
+countries <- countries %>% mutate(names = countrycode(geo, 'eurostat', 'country.name', nomatch = NA)) %>% mutate(names = replace_na(names, 'EU'))
+
+graph_countries <- ggplot(countries) +
+      geom_segment(aes(x = 0, xend = OBS_VALUE, y = reorder(names, OBS_VALUE), yend = reorder(names, OBS_VALUE)), size = 3, color = 'chartreuse3') +
+      geom_segment(data = subset(countries, names %in% 'Italy'), aes(x = 0, xend = OBS_VALUE, y = reorder(names, OBS_VALUE), yend = reorder(names, OBS_VALUE)), size = 3, color = 'black') +
+      geom_segment(data = subset(countries, names %in% 'EU'), aes(x = 0, xend = OBS_VALUE, y = reorder(names, OBS_VALUE), yend = reorder(names, OBS_VALUE)), size = 3, color = 'darkgrey') +
+      labs(x = 'Percentage of ELET among people aged 18-24 in 2022', y = '', title = 'ELET by country', caption = "Source: Eurostat") +
+      theme_minimal() + 
+      theme(panel.grid.major.y = element_blank(), plot.title = element_text(size = 15), axis.title = element_text(size = 10), plot.caption = element_text(size = 7)) 
+graph_countries
+
+ggsave(graph_countries, filename = 'graph_countries.png', device = 'png', height = 1500, width = 2000, units = 'px', bg = 'white')
+```
+
+```{r}
+# REGIONS
+
+regions_1 <- regions %>% mutate(target = cut(OBS_VALUE, breaks = c(0, 9, 10, 14, Inf), labels = c('<9% (EU 2030 target: <9%)','9-10% (EU 2020 target: <10%)','10-11%','>14%'))) %>% mutate(region=geo)
+regions_2 <- regions_1 %>% mutate(region = case_when(region == 'Trentino Alto Adige' ~ "Trentino-Alto Adige", region == 'Sicilia' ~ "Sicily", region == 'Puglia' ~ "Apulia", TRUE ~ region))
+italy <- ne_states(country = "italy", returnclass = "sf") %>% mutate(region = case_when(region == 'Trentino Alto Adige' ~ "Trentino-Alto Adige", region == 'Sicilia' ~ "Sicily", region == 'Puglia' ~ "Apulia", TRUE ~ region))
+italy_summary <- italy %>% group_by(region) %>% summarise()
+map_elet <- left_join(italy_summary, regions_2, by = "region")
+names(map_elet)
+
+graph_regions <- ggplot(data = map_elet, mapping = aes(fill = target)) + 
+  geom_sf() + 
+  scale_fill_brewer(palette = "Greens", na.value = "white", name = 'Share of ELET among \npeople aged 18-24 in 2022') +
+  labs(title = "ELET by region", caption = "Source: INVALSI") + 
+  theme_minimal() +
+  theme(plot.title = element_text(size = 15), legend.title = element_text(size = 10), plot.caption = element_text(size = 7), panel.grid = element_blank(), axis.text = element_blank())
+graph_regions
+
+ggsave(graph_regions, filename = 'graph_regions.png', device = 'png', height = 1500, width = 2000, units = 'px', bg = 'white')
+
+      # manually substituted regions codes with regions names as there is no function to do so
+      # manually removed the observation for the region Valle D'Aosta as contained NA and NA causes problems with mapIT()
+      # manually merged the observations for Provincia Autonoma di Bolzano and Provincia Autonoma di Trento as mapIT() considers the two provinces as a single region called Trentino Alto Adige (the value is entered by using existing values weighted according to ISTAT data about 2024 residents aged 18-24 of said two provinces)
+```
+
+
+
+
+```{r}
+# TIME SERIES
+
+overtime_1 <- overtime %>% mutate(names = countrycode(geo, 'eurostat', 'country.name', nomatch = NA)) %>% mutate(names = replace_na(names, 'EU'))
+overtime_2 <- overtime_1 %>% filter(TIME_PERIOD >= 2015 & names %in% c('Italy', 'Germany', 'Spain', 'EU'))
+
+graph_overtime <- ggplot(overtime_2, aes(x = TIME_PERIOD, y = OBS_VALUE, group = names, color = names)) +
+      geom_line(size = 2) +
+      scale_color_manual(values = c('Germany' = 'royalblue1', 'Italy' = 'black', 'Spain' = 'chartreuse2', 'EU' = 'darkgrey')) +
+      scale_y_continuous(limits = c(0, 20)) +
+      labs(x = '', y = 'Percentage of ELET among people aged 18-24', color = 'Country', title = 'ELET over time', caption = "Source: Eurostat") +
+      theme_minimal() +
+      theme(panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(), plot.title = element_text(size = 15), axis.title = element_text(size = 10), legend.title = element_text(size = 10), plot.caption = element_text(size = 7))
+graph_overtime
+
+ggsave(graph_overtime, filename = 'graph_overtime.png', device = 'png', height = 1500, width = 2000, units = 'px', bg = 'white')
+```
+
+```{r}
+# INVALSI S.E.C.
+
+ita_1 <- ita %>% select('STUDENTE_ANONIMO', 'Cod_Reg', 'ESCS_studente', 'TIPO_SCUOLA', 'LIVELLI_WLE_ITA') %>% na.omit()
+maths_1 <- maths %>% select('STUDENTE_ANONIMO', 'LIVELLI_WLE_MAT') %>% na.omit()
+er_1 <- er %>% select('STUDENTE_ANONIMO', 'LIVELLI_WLE_ERE') %>% na.omit()
+el_1 <- el %>% select('STUDENTE_ANONIMO', 'LIVELLI_WLE_ELI') %>% na.omit()
+
+inv_3 <- merge(ita_1, maths_1, by = 'STUDENTE_ANONIMO')
+inv_2 <- merge(er_1, inv_3, by = 'STUDENTE_ANONIMO')
+inv_1 <- merge(el_1, inv_2, by = 'STUDENTE_ANONIMO') %>% mutate('implicit' = ifelse(LIVELLI_WLE_ITA < 3 & LIVELLI_WLE_MAT < 3 & LIVELLI_WLE_ERE <2& LIVELLI_WLE_ELI < 2, 1, 0))
+inv_1[inv_1 == " "] <- NA
+inv_1$ESCS_studente <- as.numeric(gsub(',', '.', inv_1$ESCS_studente))
+inv <- inv_1 %>% na.omit()
+
+mean(inv$implicit) 
+
+impl_mean <- mean(inv$ESCS_studente[inv$implicit == 1])
+not_impl_mean <- mean(inv$ESCS_studente[inv$implicit == 0])
+
+graph_socio_econ <- ggplot(inv) +
+      geom_histogram(data = subset(inv, implicit == 0), aes(x = ESCS_studente, fill = "Implicit leaver students"), bins = 28) +
+      geom_histogram(data = subset(inv, implicit == 1), aes(x = ESCS_studente, fill = "Not implicit leaver students"), bins = 28) +
+      geom_segment(x = impl_mean, xend = impl_mean, y = -100, yend = 250, color = "grey", size = 1) +
+      geom_vline(xintercept = not_impl_mean, color = "grey", size = 1) +
+      labs(x = 'Socio-economic-cultural background score\n(mean represented by the grey lines)', y = 'Students in the 2023 sample', title = 'Implicit ELET by socio-economic-cultural score', caption = "Source: INVALSI") +
+      scale_fill_manual(values = c("chartreuse3", "black"), name = "Implicit leavers", labels = c("No", "Yes")) +
+      theme_minimal() +
+      theme(panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(), plot.title = element_text(size = 15), axis.title = element_text(size = 10), legend.title = element_text(size = 10), plot.caption = element_text(size = 7))
+graph_socio_econ
+      
+ggsave(graph_socio_econ, filename = 'graph_socio_econ.png', device = 'png', height = 1500, width = 2000, units = 'px', bg = 'white')
+```
+
+```{r}
+# INVALSI MAP
+
+inv_regions <- inv %>%
+      mutate(region = case_when(Cod_Reg == 1 ~ "Valle d'Aosta", Cod_Reg == 2 ~ "Piemonte", Cod_Reg == 3 ~ "Liguria", Cod_Reg == 4 ~ "Lombardia", Cod_Reg == 6 ~ "Veneto", Cod_Reg == 7 ~ "Friuli-Venezia Giulia", Cod_Reg == 8 ~ "Emilia-Romagna", Cod_Reg == 9 ~ "Toscana", Cod_Reg == 10 ~ "Umbria", Cod_Reg == 11 ~ "Marche", Cod_Reg == 12 ~ "Lazio", Cod_Reg == 13 ~ "Abruzzo", Cod_Reg == 14 ~ "Molise", Cod_Reg == 15 ~ "Campania", Cod_Reg == 16 ~ "Apulia", Cod_Reg == 17 ~ "Basilicata", Cod_Reg == 18 ~ "Calabria", Cod_Reg == 19 ~ "Sicily", Cod_Reg == 20 ~ "Sardegna", Cod_Reg %in% c(51, 52, 53, 54) ~ "Trentino-Alto Adige"))
+
+impl_licei <- inv_regions[inv_regions$TIPO_SCUOLA %in% c(1, 2), ] %>% group_by(region) %>% summarize(implicit = mean(implicit)*100)
+impl_tecn <- inv_regions[inv_regions$TIPO_SCUOLA == 3, ] %>% group_by(region) %>% summarize(implicit = mean(implicit)*100)
+impl_prof <- inv_regions[inv_regions$TIPO_SCUOLA == 4, ] %>% group_by(region) %>% summarize(implicit = mean(implicit)*100)
+
+italy <- ne_states(country = "italy" , returnclass = "sf") %>% group_by(region) %>% summarise()
+map_licei <- merge(italy, impl_licei, by = "region")
+map_tecn <- merge(italy, impl_tecn, by = "region")
+map_prof <- merge(italy, impl_prof, by = "region")
+
+graph_licei <- ggplot(data =  map_licei, mapping = aes(fill = implicit)) + 
+      geom_sf() + 
+      scale_fill_gradient(low="white", high="chartreuse3", name = "Percentage of implicit \nELET in the 2023 sample", limits = c(0,70),breaks = seq(0, 70, by = 10), labels = seq(0,70, by=10)) +
+      labs(title = "Licei", caption = "Source: INVALSI") + 
+      theme_minimal() +
+      theme(plot.title = element_text(size = 15), legend.title = element_text(size = 10), plot.caption = element_text(size = 7), panel.grid = element_blank(), axis.text = element_blank(), plot.margin = margin(c(1, 0, 0.1, 0), "cm"))
+graph_licei
+
+graph_tecn <- ggplot(data =  map_tecn, mapping = aes(fill = implicit)) + 
+      geom_sf() + 
+      scale_fill_gradient(low="white", high="chartreuse3", name = "Percentage of implicit \nELET in the 2023 sample", limits = c(0,70),breaks = seq(0, 70, by = 10), labels = seq(0,70, by=10)) +
+      labs(title = "Istituti Tecnici") + 
+      theme_minimal() +
+      theme(plot.title = element_text(size = 15), legend.title = element_text(size = 10), panel.grid = element_blank(), axis.text = element_blank(), legend.position = "none", plot.margin = margin(c(1, 0, 0.1, 0), "cm"))
+graph_tecn  
+
+graph_prof <- ggplot(data =  map_prof, mapping = aes(fill = implicit)) + 
+      geom_sf() + 
+      scale_fill_gradient(low="white", high="chartreuse3", name = "Percentage of implicit \nELET in the 2023 sample", limits = c(0,70),breaks = seq(0, 70, by = 10), labels = seq(0,70, by=10)) +
+      labs(title = "Istituti Professionali") + 
+      theme_minimal() +
+      theme(plot.title = element_text(size = 15), legend.title = element_text(size = 10), panel.grid = element_blank(), axis.text = element_blank(), legend.position = "none", plot.margin = margin(c(1, 0, 0.1, 0), "cm"))
+graph_prof 
+      
+ggsave(graph_licei, filename = 'graph_licei.png', device = 'png', height = 1500, width = 1500, units = 'px', bg = 'white')
+ggsave(graph_tecn, filename = 'graph_tecn.png', device = 'png', height = 1500, width = 1000, units = 'px', bg = 'white')
+ggsave(graph_prof, filename = 'graph_prof.png', device = 'png', height = 1500, width = 1000, units = 'px', bg = 'white')
+
+```
+
